@@ -14,12 +14,23 @@ FILENAMES = (
     "Site04_final_adj_5mpp_surf.tif",
     "Site04_final_adj_5mpp_slp.tif",
 )
+NAIF = "https://naif.jpl.nasa.gov/pub/naif/generic_kernels"
+KERNEL_URLS = (
+    f"{NAIF}/lsk/naif0012.tls",
+    f"{NAIF}/spk/planets/a_old_versions/de421.bsp",
+    f"{NAIF}/pck/moon_pa_de421_1900-2050.bpc",
+    f"{NAIF}/fk/satellites/moon_080317.tf",
+)
 
 
-def download_site04(output_dir: Path, timeout_seconds: float = 60.0) -> None:
-    """Fetch original rasters; timeout_seconds is the network operation timeout."""
+def download_site04(
+    output_dir: Path, timeout_seconds: float = 60.0, *, kernels_only: bool = False,
+) -> None:
+    """Fetch rasters or pinned NAIF kernels; network timeout is in seconds."""
     output_dir.mkdir(parents=True, exist_ok=True)
-    for filename in FILENAMES:
+    urls = KERNEL_URLS if kernels_only else tuple(f"{BASE_URL}/{f}" for f in FILENAMES)
+    for url in urls:
+        filename = url.rsplit("/", 1)[1]
         destination = output_dir / filename
         checksum_path = output_dir / f"{filename}.sha256"
         if destination.exists():
@@ -32,8 +43,7 @@ def download_site04(output_dir: Path, timeout_seconds: float = 60.0) -> None:
             print(f"Verified existing {filename}: {actual_hash}", flush=True)
             continue
 
-        url = f"{BASE_URL}/{filename}"
-        temporary_path = destination.with_suffix(".tif.part")
+        temporary_path = destination.with_suffix(destination.suffix + ".part")
         digest = hashlib.sha256()
         print(f"Downloading {url}", flush=True)
         try:
@@ -50,8 +60,11 @@ def download_site04(output_dir: Path, timeout_seconds: float = 60.0) -> None:
             if expected_bytes is not None and received_bytes != int(expected_bytes):
                 raise RuntimeError(f"Incomplete download: {url}")
             with temporary_path.open("rb") as stream:
-                magic = stream.read(4)
-            if magic not in (b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+"):
+                magic = stream.read(8)
+            if kernels_only:
+                if not magic.startswith((b"KPL/LSK", b"KPL/FK", b"DAF/SPK", b"DAF/PCK")):
+                    raise RuntimeError(f"Response is not a SPICE kernel: {url}")
+            elif magic[:4] not in (b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+"):
                 raise RuntimeError(f"Response is not a TIFF: {url}")
             temporary_path.replace(destination)
             checksum_path.write_text(f"{digest.hexdigest()}  {filename}\n# {url}\n")
@@ -63,5 +76,8 @@ def download_site04(output_dir: Path, timeout_seconds: float = 60.0) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=Path("data/Site04"))
+    parser.add_argument("--kernels-only", action="store_true")
+    parser.add_argument("--kernel-dir", type=Path, default=Path("data/kernels"))
     args = parser.parse_args()
-    download_site04(args.output_dir)
+    download_site04(args.kernel_dir if args.kernels_only else args.output_dir,
+                    kernels_only=args.kernels_only)
