@@ -15,7 +15,8 @@ def build_cost_surface(
     slope_limit_deg is required and strictly between 0 and 90 degrees; equality
     at the cutoff is allowed. slope_weight is a required finite, nonnegative,
     dimensionless preference parameter. Neither parameter is an EVA constant.
-    See DECISIONS.md for the approved uncalibrated model and pending EVA research.
+    See DECISIONS.md for the uncalibrated model and completed EVA assessment;
+    no verified usable metabolic model was found in the sources assessed.
 
     Masked or nonfinite slope samples are blocked. Finite slopes outside [0, 90]
     degrees are malformed input. The returned weights multiply distance in
