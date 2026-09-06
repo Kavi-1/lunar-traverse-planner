@@ -2,7 +2,12 @@
 name = "lunar-traverse-planner"
 version = "0.1.0"
 requires-python = ">=3.11,<3.12"
-dependencies = ["numpy", "rasterio", "matplotlib"]
+dependencies = [
+    "numpy",
+    "rasterio",
+    "matplotlib",
+    "scikit-image>=0.26.0",
+]
 
 [dependency-groups]
 dev = ["pytest", "ruff"]
