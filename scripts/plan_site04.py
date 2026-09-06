@@ -1,8 +1,8 @@
 """Run the unsourced 15/20/25-degree cutoff sweep on the full Site04 grid.
 
 From the repository root, for example:
-python -m scripts.plan_site04 --start-xy-m -6497.5 -1502.5 \
-    --goal-xy-m -4497.5 -3502.5 --slope-weight 2
+python -m scripts.plan_site04 --start-xy-m -5697.5 -10002.5 \
+    --goal-xy-m -4497.5 -10002.5 --slope-weight 2
 These endpoints are demonstration samples, not operational EVA locations.
 """
 
@@ -68,11 +68,21 @@ def plan_site04(
                    if key not in ("route_rc", "route_xy_m")}
         summary.update(slope_limit_deg=slope_limit_deg, slope_weight=slope_weight,
                        cost_surface_seconds=cost_seconds, routing_seconds=route_seconds)
+        # Compare route length with the Euclidean separation of its snapped
+        # pixel-center endpoints, in the same projected-meter convention.
+        start_center_m = np.asarray(result["snapped_start_xy_m"])
+        goal_center_m = np.asarray(result["snapped_goal_xy_m"])
+        separation_m = goal_center_m - start_center_m
+        straight_length_m = float(np.hypot(*separation_m))
+        summary["straight_line_distance_m"] = straight_length_m
         axis, profile = axes[:, column]
         artist = axis.imshow(
             np.ma.masked_where(~np.isfinite(weights), slope_deg),
             extent=extent_m, origin="upper", cmap=cmap, vmin=0, vmax=25,
         )
+        axis.plot([start_center_m[0], goal_center_m[0]],
+                  [start_center_m[1], goal_center_m[1]], "w--", linewidth=1,
+                  label=f"Direct: {straight_length_m:.0f} m")
         axis.scatter(*start_xy_m, marker="o", color="white", edgecolor="black", label="Start")
         axis.scatter(*goal_xy_m, marker="*", color="red", edgecolor="black", label="Goal")
         axis.set(xlabel="Projected X (m)", ylabel="Projected Y (m)")
