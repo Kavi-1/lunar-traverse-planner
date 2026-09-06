@@ -9,6 +9,7 @@ import spiceypy as spice
 from rasterio import Affine
 from rasterio.warp import transform
 
+from core.cost import build_cost_surface
 from core.illum import (
     FRAME,
     RADIUS_M,
@@ -22,7 +23,7 @@ from core.illum import (
     surface_basis,
     terrain_horizons_deg,
 )
-from core.terrain import load_dem_m
+from core.terrain import compute_slope_deg, load_dem_m
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -210,3 +211,27 @@ def test_real_near_field_peak_explains_spatial_sampling_difference(dem):
     assert fine["horizon_deg"][0, 0] == pytest.approx(12.574747402501846, abs=1e-7)
     assert coarse["horizon_distance_m"][0, 0] == 25
     assert fine["horizon_distance_m"][0, 0] == 22.5
+
+
+def test_shadow_cost_on_real_slope(dem):
+    z, t, _ = dem
+    slope = compute_slope_deg(z[999:1002, 999:1002], t)
+    baseline = build_cost_surface(slope, slope_limit_deg=20, slope_weight=2)
+    # A prescribed half-window shadow with weight 2 adds exactly 1 weighted
+    # meter per projected meter. This is a cost parameter test, not a fake DEM.
+    fraction = np.full(slope.shape, 0.5)
+    weighted = build_cost_surface(slope, slope_limit_deg=20, slope_weight=2,
+                                  shadow_fraction=fraction, shadow_weight=2)
+    assert weighted[1, 1] == pytest.approx(baseline[1, 1]+1, abs=1e-14)
+    assert np.array_equal(np.isinf(weighted), np.isinf(baseline))
+    fraction[1, 1] = np.nan
+    assert np.isinf(build_cost_surface(slope, slope_limit_deg=20, slope_weight=2,
+                                      shadow_fraction=fraction, shadow_weight=2)).all()
+    np.testing.assert_array_equal(build_cost_surface(
+        slope, slope_limit_deg=20, slope_weight=2, shadow_fraction=fraction, shadow_weight=0), baseline)
+    for bad in (None, [[0.5]], np.full(slope.shape, 1.1)):
+        with pytest.raises(ValueError):
+            build_cost_surface(slope, slope_limit_deg=20, slope_weight=2,
+                               shadow_fraction=bad, shadow_weight=2)
+    with pytest.raises(ValueError):
+        build_cost_surface(slope, slope_limit_deg=20, slope_weight=2, shadow_weight=-1)
