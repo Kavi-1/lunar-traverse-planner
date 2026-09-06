@@ -7,6 +7,81 @@ from rasterio.transform import rowcol, xy
 from skimage.graph import MCP_Geometric
 
 
+def route_statistics(
+    route_rc: npt.ArrayLike,
+    elevation_m: npt.ArrayLike,
+    slope_deg: npt.ArrayLike,
+    transform_m: Affine,
+) -> dict[str, float | None]:
+    """Measure an ordered eight-neighbor route on matching elevation/slope grids.
+
+    Lengths, elevation changes, ascent, and descent are meters; slopes/grades
+    are degrees. Terrain slope is the raster inclination, whereas step grade
+    follows travel direction. A one-cell route has zero distance and elevation
+    change, its cell slope as mean/max, and no step grade (None).
+
+    DEM polyline length uses projected horizontal spacing and sampled height
+    changes. It is an estimate, omitting reference-radius elevation scaling,
+    curvature corrections, and unresolved terrain; see DECISIONS.md.
+    """
+    cells = np.asarray(route_rc)
+    if cells.ndim != 2 or cells.shape[1] != 2 or len(cells) == 0:
+        raise ValueError("route_rc must be a nonempty array of row/column pairs")
+    if not np.issubdtype(cells.dtype, np.integer):
+        raise ValueError("route_rc indices must be integers")
+    heights_m = np.ma.asarray(elevation_m, dtype=np.float64).filled(np.nan)
+    slopes_deg = np.ma.asarray(slope_deg, dtype=np.float64).filled(np.nan)
+    if heights_m.ndim != 2 or heights_m.shape != slopes_deg.shape:
+        raise ValueError("Elevation and slope must be matching 2D grids")
+    if not np.isfinite(tuple(transform_m)).all():
+        raise ValueError("Transform must be finite")
+    if transform_m.b != 0 or transform_m.d != 0:
+        raise ValueError("Rotated or sheared grids are not supported")
+    if transform_m.a == 0 or transform_m.e == 0:
+        raise ValueError("Pixel spacing must be nonzero")
+    if np.any(cells < 0) or np.any(cells >= heights_m.shape):
+        raise ValueError("route_rc contains indices outside the raster")
+    # Convert after the bounds check so unsigned index differences cannot wrap.
+    cells = cells.astype(np.int64)
+    step_rc = np.diff(cells, axis=0)
+    if np.any(np.max(np.abs(step_rc), axis=1) != 1):
+        raise ValueError("Route steps must connect distinct eight-neighbor cells")
+    rows, columns = cells.T
+    route_heights_m = heights_m[rows, columns]
+    route_slopes_deg = slopes_deg[rows, columns]
+    if not np.isfinite(route_heights_m).all() or not np.isfinite(route_slopes_deg).all():
+        raise ValueError("Route visits invalid elevation or slope")
+    if np.any((route_slopes_deg < 0) | (route_slopes_deg > 90)):
+        raise ValueError("Route slope must be between 0 and 90 degrees")
+
+    # Columns follow affine X spacing; rows follow affine Y spacing (negative
+    # at Site04). hypot measures unsigned projected horizontal step lengths.
+    distance_m = np.hypot(step_rc[:, 1] * transform_m.a, step_rc[:, 0] * transform_m.e)
+    height_change_m = np.diff(route_heights_m)
+    projected_length_m = float(distance_m.sum())
+    if len(cells) == 1:
+        mean_slope_deg = float(route_slopes_deg[0])
+        max_abs_grade_deg = None
+    else:
+        # Each edge spends half its distance in each endpoint cell. Use the
+        # same distance weighting as MCP, without applying preference weights.
+        edge_slope_deg = (route_slopes_deg[:-1] + route_slopes_deg[1:]) / 2
+        mean_slope_deg = float(np.sum(distance_m * edge_slope_deg) / projected_length_m)
+        # Positive grade is ascent in route order; atan2 takes rise/run in m/m.
+        step_grade_deg = np.rad2deg(np.arctan2(height_change_m, distance_m))
+        max_abs_grade_deg = float(np.max(np.abs(step_grade_deg)))
+    return {
+        "projected_length_m": projected_length_m,
+        "dem_polyline_length_m": float(np.hypot(distance_m, height_change_m).sum()),
+        "ascent_m": float(np.maximum(height_change_m, 0).sum()),
+        "descent_m": float(np.maximum(-height_change_m, 0).sum()),
+        "net_elevation_change_m": float(route_heights_m[-1] - route_heights_m[0]),
+        "max_terrain_slope_deg": float(route_slopes_deg.max()),
+        "mean_terrain_slope_deg": mean_slope_deg,
+        "max_abs_step_grade_deg": max_abs_grade_deg,
+    }
+
+
 def find_route(
     cost_weights: npt.ArrayLike,
     transform_m: Affine,

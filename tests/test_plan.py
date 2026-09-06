@@ -8,7 +8,7 @@ import pytest
 from rasterio import Affine
 
 from core.cost import build_cost_surface
-from core.plan import find_route
+from core.plan import find_route, route_statistics
 from core.terrain import compute_slope_deg, load_dem_m
 
 DEM_PATH = Path(__file__).resolve().parents[1] / "data/Site04/Site04_final_adj_5mpp_surf.tif"
@@ -244,3 +244,108 @@ def test_route_parameter_monotonicity(slope_patch_deg, routing_patch):
         assert costs[1] <= restricted["total_cost_weighted_m"] + 1e-12
     else:
         assert restricted["total_cost_weighted_m"] is None
+
+
+@pytest.fixture(scope="module")
+def statistics_patch():
+    elevation_m, transform_m, _ = load_dem_m(DEM_PATH)
+    patch_m = elevation_m[999:1004, 999:1004]
+    return patch_m, compute_slope_deg(patch_m, transform_m), transform_m
+
+
+def test_statistics_hand_checked(statistics_patch):
+    heights_m, slopes_deg, transform_m = statistics_patch
+    result = route_statistics([[1, 1], [1, 2], [2, 3]], heights_m, slopes_deg, transform_m)
+    # Independent scalar arithmetic from the raw DEM, without production helpers:
+    # heights = 1235.669921875, 1236.615966796875, 1239.0230712890625 m.
+    # rises = 0.946044921875, 2.4071044921875 m; runs = 5, sqrt(50) m.
+    # length = 5+sqrt(50) = 12.071067811865476 m.
+    # polyline = sqrt(25+0.946044921875²)+sqrt(50+2.4071044921875²)
+    #          = 12.558261413458432 m.
+    # Ascent/net = 0.946044921875+2.4071044921875 = 3.3531494140625 m.
+    # No negative rise means zero descent.
+    # Central gx,gy from opposite raw neighbors, divided by +10,-10 m:
+    # (1236.615966796875-1234.658447265625)/10 = 0.195751953125;
+    # (1236.9766845703125-1234.46923828125)/-10 = -0.25074462890625.
+    # (1237.59619140625-1235.669921875)/10 = 0.192626953125;
+    # (1238.0115966796875-1235.3369140625)/-10 = -0.26746826171875.
+    # (1240.208251953125-1238.0115966796875)/10 = 0.21966552734375;
+    # (1240.349365234375-1237.59619140625)/-10 = -0.2753173828125.
+    # atan(sqrt(gx²+gy²))*180/pi gives slopes s0,s1,s2:
+    # 17.646201418369948, 18.242866980426832, 19.402825626556908 deg.
+    # Mean = [5*(s0+s1)/2+sqrt(50)*(s1+s2)/2]/[5+sqrt(50)]
+    #      = 18.459037517979905 deg; max is s2.
+    # Grades = atan(rise/run)*180/pi = 10.714218007014956,
+    # 18.799394807511753 deg; the latter is max absolute grade.
+    expected = {
+        "projected_length_m": 12.071067811865476,
+        "dem_polyline_length_m": 12.558261413458432,
+        "ascent_m": 3.3531494140625,
+        "descent_m": 0,
+        "net_elevation_change_m": 3.3531494140625,
+        "max_terrain_slope_deg": 19.402825626556908,
+        "mean_terrain_slope_deg": 18.459037517979905,
+        "max_abs_step_grade_deg": 18.799394807511753,
+    }
+    assert result == pytest.approx(expected, abs=1e-12)
+
+
+def test_statistics_reverse_route(statistics_patch):
+    heights_m, slopes_deg, transform_m = statistics_patch
+    # Include both upward and downward steps through the actual observations.
+    cells = [[1, 1], [1, 2], [2, 3], [2, 2]]
+    forward = route_statistics(cells, heights_m, slopes_deg, transform_m)
+    backward = route_statistics(cells[::-1], heights_m, slopes_deg, transform_m)
+    assert forward["ascent_m"] > 0 and forward["descent_m"] > 0
+    assert forward["ascent_m"] == backward["descent_m"]
+    assert forward["descent_m"] == backward["ascent_m"]
+    assert forward["net_elevation_change_m"] == -backward["net_elevation_change_m"]
+    assert forward["ascent_m"] - forward["descent_m"] == forward["net_elevation_change_m"]
+    for key in ("projected_length_m", "dem_polyline_length_m", "max_terrain_slope_deg",
+                "mean_terrain_slope_deg", "max_abs_step_grade_deg"):
+        assert forward[key] == pytest.approx(backward[key], abs=1e-12)
+    assert forward["dem_polyline_length_m"] >= forward["projected_length_m"]
+
+
+def test_statistics_single_cell(statistics_patch):
+    heights_m, slopes_deg, transform_m = statistics_patch
+    result = route_statistics([[1, 1]], heights_m, slopes_deg, transform_m)
+    for key in ("projected_length_m", "dem_polyline_length_m", "ascent_m", "descent_m",
+                "net_elevation_change_m"):
+        assert result[key] == 0
+    # Same independently derived center inclination as test_statistics_hand_checked.
+    assert result["mean_terrain_slope_deg"] == pytest.approx(17.646201418369948, abs=1e-12)
+    assert result["max_terrain_slope_deg"] == result["mean_terrain_slope_deg"]
+    assert result["max_abs_step_grade_deg"] is None
+
+
+@pytest.mark.parametrize("cells", [
+    [], [1, 1], [[1.0, 1.0]], [[-1, 1]], [[5, 1]],
+    [[1, 1], [1, 1]], [[1, 1], [3, 3]], [[0, 0]],
+])
+def test_statistics_invalid_route(statistics_patch, cells):
+    heights_m, slopes_deg, transform_m = statistics_patch
+    with pytest.raises(ValueError):
+        route_statistics(cells, heights_m, slopes_deg, transform_m)
+
+
+def test_statistics_invalid_grids(statistics_patch):
+    heights_m, slopes_deg, transform_m = statistics_patch
+    with pytest.raises(ValueError, match="matching 2D"):
+        route_statistics([[1, 1]], heights_m[:-1], slopes_deg, transform_m)
+    masked_m = np.ma.array(heights_m, mask=False)
+    masked_m.mask[1, 1] = True
+    with pytest.raises(ValueError, match="invalid elevation"):
+        route_statistics([[1, 1]], masked_m, slopes_deg, transform_m)
+    with pytest.raises(ValueError, match="between 0 and 90"):
+        route_statistics([[1, 1]], heights_m, -slopes_deg, transform_m)
+
+
+@pytest.mark.parametrize("transform_m", [
+    Affine(5, 1, 0, 0, -5, 0), Affine(0, 0, 0, 0, -5, 0),
+    Affine(5, 0, np.nan, 0, -5, 0),
+])
+def test_statistics_invalid_transform(statistics_patch, transform_m):
+    heights_m, slopes_deg, _ = statistics_patch
+    with pytest.raises(ValueError):
+        route_statistics([[1, 1]], heights_m, slopes_deg, transform_m)
