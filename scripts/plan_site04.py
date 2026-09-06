@@ -1,4 +1,4 @@
-"""Run the unsourced 15/20/25-degree cutoff sweep on the full Site04 grid.
+"""Run the 15/20/25-degree sensitivity sweep on the full Site04 grid.
 
 From the repository root, for example:
 python -m scripts.plan_site04 --start-xy-m -5697.5 -10002.5 \
@@ -34,7 +34,9 @@ def plan_site04(
     """Print route summaries and save maps/profiles; positions and heights are meters.
 
     slope_weight is a required dimensionless preference, not a metabolic constant.
-    Cutoffs are user-approved unsourced placeholders pending milestone 2a.
+    The 20-degree case is a literature-informed planning comparison; 15 and 25
+    degrees are analyst-selected sensitivity cases, not an operational range.
+    See DECISIONS.md for sources and limits of the milestone-2a assessment.
     No terrain is cropped for routing or statistics; map axes zoom for inspection.
     """
     started_seconds = perf_counter()
@@ -46,7 +48,8 @@ def plan_site04(
     print(f"DEM SHA-256: {digest}", flush=True)
     print(f"Load/hash/slope seconds: {perf_counter() - started_seconds:.6f}", flush=True)
     print("Objective: terrain preference in weighted meters, NOT energy.", flush=True)
-    print("Cutoffs 15/20/25 deg: unsourced placeholders pending milestone 2a.", flush=True)
+    print("20 deg: literature-informed comparison; 15/25 deg: sensitivity cases.", flush=True)
+    print("Cutoffs allow equality; these are not operational EVA safety limits.", flush=True)
     print("Eight-neighbor diagonals may touch one or two blocked side cells.", flush=True)
 
     west_m, south_m, east_m, north_m = array_bounds(*elevation_m.shape, transform_m)
@@ -132,7 +135,7 @@ def plan_site04(
     figure.colorbar(artist, ax=axes[0].tolist(), label="Terrain slope (deg); gray = blocked")
     figure.suptitle(
         f"Site04 | slope weight {slope_weight:g} | weighted meters, not energy\n"
-        "15° / 20° / 25° are unsourced placeholders; full-grid search, zoomed maps"
+        "20°: literature-informed comparison; 15°/25°: sensitivity cases, not safety limits"
     )
     output_png.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_png, dpi=150)
