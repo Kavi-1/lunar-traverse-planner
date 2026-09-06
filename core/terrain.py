@@ -37,3 +37,50 @@ def load_dem_m(path: Path) -> tuple[npt.NDArray[np.float64], Affine, CRS]:
         elevation_m = elevation_m * dataset.scales[0] + dataset.offsets[0]
         elevation_m[~np.isfinite(elevation_m)] = np.nan
         return elevation_m, dataset.transform, dataset.crs
+
+
+def compute_slope_deg(elevation_m: npt.ArrayLike, transform_m: Affine) -> npt.NDArray[np.float64]:
+    """Return Horn slope in degrees using native projected-meter spacing.
+
+    Horn (1981), Hill Shading and the Reflectance Map, Proc. IEEE 69, 14–47,
+    doi:10.1109/PROC.1981.11918. This is an exploratory estimator, not a verified
+    reproduction of NASA's Site04 method. No surface-distance correction is made.
+    Requires an axis-aligned raster at least 3x3; borders and any neighborhood
+    containing invalid elevation are NaN. No padding or gap filling is applied.
+    """
+    values_m = np.ma.asarray(elevation_m, dtype=np.float64).filled(np.nan)
+    if values_m.ndim != 2 or min(values_m.shape) < 3:
+        raise ValueError("Elevation must be a 2D array with at least 3 rows and columns")
+    if not np.all(np.isfinite(tuple(transform_m))):
+        raise ValueError("Transform must be finite")
+    if transform_m.b != 0 or transform_m.d != 0:
+        raise ValueError("Rotated or sheared grids are not supported")
+    if transform_m.a == 0 or transform_m.e == 0:
+        raise ValueError("Pixel spacing must be nonzero")
+
+    # a b c / d e f / g h i are elevations in a 3x3 raster window.
+    # X increases with column for Site04; Y decreases with row. Signed affine
+    # spacings preserve that direction: e is -5 m for Site04, not +5 m.
+    # Weighted differences divide by 8 (= 2-pixel baseline * weights 1+2+1).
+    a_m, b_m, c_m = values_m[:-2, :-2], values_m[:-2, 1:-1], values_m[:-2, 2:]
+    d_m, f_m = values_m[1:-1, :-2], values_m[1:-1, 2:]
+    g_m, h_m, i_m = values_m[2:, :-2], values_m[2:, 1:-1], values_m[2:, 2:]
+    gradient_x = ((c_m - a_m) + 2 * (f_m - d_m) + (i_m - g_m)) / (8 * transform_m.a)
+    gradient_y = ((g_m - a_m) + 2 * (h_m - b_m) + (i_m - c_m)) / (8 * transform_m.e)
+
+    valid = np.ones(gradient_x.shape, dtype=bool)
+    for row_offset in range(3):
+        for column_offset in range(3):
+            valid &= np.isfinite(
+                values_m[
+                    row_offset : row_offset + valid.shape[0],
+                    column_offset : column_offset + valid.shape[1],
+                ]
+            )
+
+    # dz/dx and dz/dy are m/m. atan of gradient magnitude is inclination to
+    # the projected horizontal plane; convert radians to degrees explicitly.
+    interior_deg = np.rad2deg(np.arctan(np.hypot(gradient_x, gradient_y)))
+    slope_deg = np.full(values_m.shape, np.nan, dtype=np.float64)
+    slope_deg[1:-1, 1:-1] = np.where(valid, interior_deg, np.nan)
+    return slope_deg
