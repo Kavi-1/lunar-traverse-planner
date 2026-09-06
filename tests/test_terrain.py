@@ -54,19 +54,20 @@ def test_horn_real_neighborhood_hand_checked(dem, row, column, expected_deg):
     # (500,500): 3.979705810546875,4.362579345703125 m ->
     #           0.099492645263671875,-0.109064483642578125.
     # Each expected angle is atan(sqrt(gx*gx + gy*gy)) * 180/pi.
-    result_deg = compute_slope_deg(neighborhood_m, transform_m)
+    result_deg = compute_slope_deg(neighborhood_m, transform_m, method="horn")
     assert result_deg[1, 1] == pytest.approx(expected_deg, abs=1e-12)
     assert np.count_nonzero(np.isfinite(result_deg)) == 1
 
 
+@pytest.mark.parametrize("method", ["central", "horn", "forward"])
 @pytest.mark.parametrize("row_offset,column_offset", [(r, c) for r in range(3) for c in range(3)])
-def test_invalid_neighbor_excludes_center(dem, row_offset, column_offset):
+def test_invalid_neighbor_excludes_center(dem, row_offset, column_offset, method):
     elevation_m, transform_m, _ = dem
     # Mask observations in a real neighborhood to test missing-data handling;
     # do not generate or replace any terrain heights.
     neighborhood_m = np.ma.array(elevation_m[999:1002, 999:1002], mask=False)
     neighborhood_m.mask[row_offset, column_offset] = True
-    assert np.isnan(compute_slope_deg(neighborhood_m, transform_m)).all()
+    assert np.isnan(compute_slope_deg(neighborhood_m, transform_m, method=method)).all()
 
 
 def test_unsupported_grid_stops(dem):
@@ -78,3 +79,26 @@ def test_unsupported_grid_stops(dem):
         compute_slope_deg(patch_m, Affine(0, 0, 0, 0, -5, 0))
     with pytest.raises(ValueError, match="at least 3"):
         compute_slope_deg(patch_m[:2], transform_m)
+
+
+@pytest.mark.parametrize(
+    "method,expected_deg",
+    [("central", 17.646201418369948), ("forward", 17.882469994042452)],
+)
+def test_unweighted_real_neighborhood_hand_checked(dem, method, expected_deg):
+    elevation_m, transform_m, _ = dem
+    # Actual (1000,1000) neighborhood: central X,Y differences are
+    # 1.95751953125, 2.5074462890625 m, over +10,-10 m respectively.
+    # Forward differences are 0.946044921875,1.3067626953125 m over +5,-5 m.
+    # Expected degrees = atan(sqrt(gx*gx + gy*gy)) * 180/pi.
+    result_deg = compute_slope_deg(elevation_m[999:1002, 999:1002], transform_m, method=method)
+    assert result_deg[1, 1] == pytest.approx(expected_deg, abs=1e-12)
+    assert np.count_nonzero(np.isfinite(result_deg)) == 1
+
+
+def test_production_default_is_central(dem):
+    elevation_m, transform_m, _ = dem
+    result_deg = compute_slope_deg(elevation_m[999:1002, 999:1002], transform_m)
+    assert result_deg[1, 1] == pytest.approx(17.646201418369948, abs=1e-12)
+    with pytest.raises(ValueError, match="Unknown slope method"):
+        compute_slope_deg(elevation_m[999:1002, 999:1002], transform_m, method="unknown")

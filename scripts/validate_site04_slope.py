@@ -1,4 +1,4 @@
-"""Characterize Horn minus NASA Site04 slope; no numerical pass/fail gate.
+"""Characterize Central minus NASA Site04 slope; no numerical pass/fail gate.
 
 From the repository root: uv run python -m scripts.validate_site04_slope
 Print full-resolution statistics and write a diagnostic PNG, without resampling
@@ -58,10 +58,18 @@ def validate_site04(data_dir: Path, output_png: Path) -> None:
         raise ValueError("No comparable pixels")
     if np.any((reference_deg[valid_reference] < 0) | (reference_deg[valid_reference] > 90)):
         raise ValueError("Reference contains slope outside 0–90 degrees")
+    print("Estimator comparison on the same valid pixels (RMSE in degrees):")
+    for method in ("central", "horn", "forward"):
+        estimate_deg = compute_slope_deg(elevation_m, transform_m, method=method)
+        if not np.array_equal(np.isfinite(estimate_deg), valid_computed):
+            raise ValueError("Estimator validity masks differ")
+        comparison_deg = estimate_deg[valid] - reference_deg[valid]
+        print(f"  {method}: {np.sqrt(np.mean(comparison_deg**2)):.12f} deg")
+    del estimate_deg, comparison_deg
     residual_deg = np.where(valid, computed_deg - reference_deg, np.nan)
     differences_deg = residual_deg[valid]
     absolute_deg = np.abs(differences_deg)
-    print("Exploratory characterization: Horn minus NASA (degrees); NO PASS/FAIL GATE")
+    print("Exploratory characterization: Central minus NASA (degrees); NO PASS/FAIL GATE")
     print(f"Grid: {elevation_m.shape}; transform (meters): {tuple(transform_m)}")
     print(f"CRS: {crs.to_wkt()}")
     print(f"Total pixels: {valid.size:,}; compared: {valid.sum():,}")
@@ -118,7 +126,7 @@ def validate_site04(data_dir: Path, output_png: Path) -> None:
     # always use every eligible source pixel; common limits make maps comparable.
     for axis, values_deg, title in (
         (axes[0, 0], reference_deg, "NASA reference"),
-        (axes[0, 1], computed_deg, "Horn, projected-meter spacing"),
+        (axes[0, 1], computed_deg, "Central, projected-meter spacing"),
     ):
         artist = axis.imshow(values_deg, extent=extent_m, origin="upper", vmin=0, vmax=90)
         axis.set_title(title)
@@ -132,14 +140,16 @@ def validate_site04(data_dir: Path, output_png: Path) -> None:
         vmin=-display_limit_deg,
         vmax=display_limit_deg,
     )
-    axes[0, 2].set_title("Horn − NASA (color clipped at P99 |error|)")
+    axes[0, 2].set_title("Central − NASA (color clipped at P99 |error|)")
     figure.colorbar(artist, ax=axes[0, 2], label="Residual (deg)", extend="both")
     for axis in axes[0]:
         axis.set_xlabel("Projected X (m)")
         axis.set_ylabel("Projected Y (m)")
     axes[1, 0].hist(differences_deg, bins=150, log=True)
     axes[1, 0].set(
-        xlabel="Horn − NASA (deg)", ylabel="Pixel count (log)", title="Full residual distribution"
+        xlabel="Central − NASA (deg)",
+        ylabel="Pixel count (log)",
+        title="Full residual distribution",
     )
     histogram = axes[1, 1].hist2d(
         reference_deg[valid], differences_deg, bins=150, norm=matplotlib.colors.LogNorm()
@@ -147,7 +157,7 @@ def validate_site04(data_dir: Path, output_png: Path) -> None:
     figure.colorbar(histogram[3], ax=axes[1, 1], label="Pixel count (log)")
     axes[1, 1].set(
         xlabel="NASA slope (deg)",
-        ylabel="Horn − NASA (deg)",
+        ylabel="Central − NASA (deg)",
         title="Residual versus reference slope",
     )
     # Masked averages avoid interpreting missing rows/columns as zero bias.
