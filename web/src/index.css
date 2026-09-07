@@ -1,0 +1,16 @@
+:root {
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+  color: #222;
+  background: white;
+}
+body { margin: 0; }
+main { max-width: 1000px; padding: 16px; margin: auto; }
+button { font: inherit; cursor: pointer; }
+button:disabled { cursor: default; }
+h1 { font-size: 1.6rem; }
+h2 { font-size: 1.2rem; margin-top: 0; }
+dt { font-weight: 600; }
+dd { margin: 0 0 12px; }
+summary { cursor: pointer; }
+[role='alert'] { color: #a00000; }

@@ -1,0 +1,10 @@
+.planner {
+  display: grid;
+  grid-template-columns: minmax(0, 500px) minmax(0, 1fr);
+  gap: 24px;
+}
+.map { display: block; width: 100%; aspect-ratio: 1; cursor: crosshair; }
+.map[aria-busy='true'] { cursor: wait; }
+@media (max-width: 700px) {
+  .planner { grid-template-columns: minmax(0, 1fr); }
+}
