@@ -1,0 +1,211 @@
+{
+  "start_utc": "2026-09-01T09:00:00",
+  "end_utc": "2026-09-01T15:00:00",
+  "frame": "MOON_ME_DE421",
+  "shadow_weight": 2.0,
+  "slope_weight": 2.0,
+  "time_step_seconds": 300,
+  "kernel_sha256": {
+    "naif0012.tls": "678e32bdb5a744117a467cd9601cd6b373f0e9bc9bbde1371d5eee39600a039b",
+    "de421.bsp": "08b20db2ae22488650641c5a9033e5bfda4b1c4b440cfeaf20f621cfa18ecdb3",
+    "moon_pa_de421_1900-2050.bpc": "656f90616403d75a75f0cd6c8830fc5b44f8cb4facb5ccb8915e752b397520cf",
+    "moon_080317.tf": "78732477b96f9863e7b0d65bcee3c22b8707ca5ed0db56d1173319cb2e8c7993"
+  },
+  "spiceypy_version": "8.2.0",
+  "toolkit_version": "CSPICE_N0067",
+  "surface_observer_max_error_deg": 2.997831879123632e-09,
+  "dem_sha256": "38ff70dbdf2f066c2cfa94a646c3a59d653ce7f6b4528b15fc1b43ee397ce758",
+  "benchmark": {
+    "observers": 4096,
+    "nodes": 8,
+    "seconds": 1.826328145001753,
+    "terrain_samples": 30368768,
+    "samples_per_second": 16628319.550959365
+  },
+  "boundary_exit": {
+    "percent": 32.18625,
+    "known": 160000,
+    "unknown": 0,
+    "seconds": 10.423108728999068,
+    "terrain_samples": 148244400,
+    "distance_step_m": 5,
+    "radius_m": 1737400.0
+  },
+  "interpolation": {
+    "max_error_deg": 0.0018493568814008654,
+    "representative_rc": [
+      2200,
+      780
+    ],
+    "azimuth_range_deg": [
+      94.2415449828009,
+      97.28903872273125
+    ],
+    "solar_elevation_range_deg": [
+      0.2008044012878881,
+      0.22841457901604692
+    ]
+  },
+  "max_azimuth_sweep_deg": 3.047512791013176,
+  "solar_elevation_range_deg": [
+    0.15520781753083376,
+    0.27371497286459395
+  ],
+  "nodes": 8,
+  "estimated_horizon_seconds": 348.4753815466389,
+  "representative_estimate_seconds": 71.34094316413098,
+  "nominal": {
+    "seconds": 72.97284020599909,
+    "terrain_samples": 1186284672,
+    "distance_step_m": 5,
+    "radius_m": 1737400.0
+  },
+  "temporal_max_fraction_change": 0.010416666668563834,
+  "temporal_mean_fraction_change": 2.7604166665433528e-05,
+  "radius_sensitivity": [
+    {
+      "seconds": 73.38197531300102,
+      "terrain_samples": 1186284672,
+      "distance_step_m": 5,
+      "radius_m": 1736400.0,
+      "max_angle_change_deg": 0.01648150207144994,
+      "rms_angle_change_deg": 0.005942064879031905,
+      "max_equivalent_height_change_m": 0.4009208729442326,
+      "exceeds_0p3m_height_reference": true,
+      "mean_fraction_change": 2.5173611110004463e-06,
+      "max_fraction_change": 0.027777777782836854
+    },
+    {
+      "seconds": 72.7004908730014,
+      "terrain_samples": 1186284672,
+      "distance_step_m": 5,
+      "radius_m": 1738400.0,
+      "max_angle_change_deg": 0.016472027614874207,
+      "rms_angle_change_deg": 0.005935811367910347,
+      "max_equivalent_height_change_m": 0.40045983106658856,
+      "exceeds_0p3m_height_reference": true,
+      "mean_fraction_change": 2.9079861105024466e-06,
+      "max_fraction_change": 0.027777777782836827
+    }
+  ],
+  "spatial": {
+    "seconds": 144.6601181099977,
+    "terrain_samples": 2373207110,
+    "distance_step_m": 2.5,
+    "radius_m": 1737400.0,
+    "max_fraction_change": 1.0,
+    "mean_fraction_change": 0.00022430555555770563,
+    "max_horizon_change_deg": 3.787817264905872,
+    "worst_observer_rc": [
+      2322,
+      976
+    ],
+    "worst_azimuth_deg": 100.91100400284498,
+    "worst_horizon_5m_deg": 23.86700004349825,
+    "worst_horizon_2p5m_deg": 27.654817308404123,
+    "worst_distance_5m_m": 20.0,
+    "worst_distance_2p5m_m": 17.5
+  },
+  "output_bounds_m": [
+    -6100.0,
+    -11000.0,
+    -4100.0,
+    -9000.0
+  ],
+  "output_shape": [
+    400,
+    400
+  ],
+  "mean_shadow_fraction": 0.6781892361108645,
+  "unknown_pixels": 0,
+  "routes": [
+    {
+      "status": "ok",
+      "requested_start_xy_m": [
+        -5697.5,
+        -10002.5
+      ],
+      "requested_goal_xy_m": [
+        -4497.5,
+        -10002.5
+      ],
+      "snapped_start_xy_m": [
+        -5697.5,
+        -10002.5
+      ],
+      "snapped_goal_xy_m": [
+        -4497.5,
+        -10002.5
+      ],
+      "start_snap_distance_m": 0.0,
+      "goal_snap_distance_m": 0.0,
+      "total_cost_weighted_m": 1654.691599603457,
+      "diagonal_blocked_side_steps": 1,
+      "diagonal_both_blocked_steps": 1,
+      "shadow_weight": 0.0,
+      "projected_length_m": 1520.4520189781083,
+      "dem_polyline_length_m": 1532.1406057611475,
+      "ascent_m": 67.418701171875,
+      "descent_m": 85.025146484375,
+      "net_elevation_change_m": -17.6064453125,
+      "max_terrain_slope_deg": 19.05016062114014,
+      "mean_terrain_slope_deg": 11.139978826496238,
+      "max_abs_step_grade_deg": 23.071027568718733,
+      "distance_weighted_mean_local_shadow_fraction": 0.6126770887100372
+    },
+    {
+      "status": "ok",
+      "requested_start_xy_m": [
+        -5697.5,
+        -10002.5
+      ],
+      "requested_goal_xy_m": [
+        -4497.5,
+        -10002.5
+      ],
+      "snapped_start_xy_m": [
+        -5697.5,
+        -10002.5
+      ],
+      "snapped_goal_xy_m": [
+        -4497.5,
+        -10002.5
+      ],
+      "start_snap_distance_m": 0.0,
+      "goal_snap_distance_m": 0.0,
+      "total_cost_weighted_m": 1947.5175345932505,
+      "diagonal_blocked_side_steps": 1,
+      "diagonal_both_blocked_steps": 0,
+      "shadow_weight": 2.0,
+      "projected_length_m": 1858.4419177103414,
+      "dem_polyline_length_m": 1867.1436337717405,
+      "ascent_m": 62.5538330078125,
+      "descent_m": 80.1602783203125,
+      "net_elevation_change_m": -17.6064453125,
+      "max_terrain_slope_deg": 19.538982014700526,
+      "mean_terrain_slope_deg": 7.42342902933834,
+      "max_abs_step_grade_deg": 23.468362967185673,
+      "distance_weighted_mean_local_shadow_fraction": 0.0029580367344292195,
+      "sensitivity_routes": {
+        "temporal": {
+          "status": "ok",
+          "same_ordered_cells": true
+        },
+        "1736400": {
+          "status": "ok",
+          "same_ordered_cells": true
+        },
+        "1738400": {
+          "status": "ok",
+          "same_ordered_cells": true
+        },
+        "spatial": {
+          "status": "ok",
+          "same_ordered_cells": true
+        }
+      }
+    }
+  ],
+  "total_analysis_seconds": 393.124087477001,
+  "peak_rss_bytes": 775208960
+}

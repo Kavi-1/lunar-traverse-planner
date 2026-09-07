@@ -1,0 +1,8 @@
+{
+  "source_dem_sha256": "38ff70dbdf2f066c2cfa94a646c3a59d653ce7f6b4528b15fc1b43ee397ce758",
+  "files_sha256": {
+    "site04_dem_window.tif": "eedcfb897894686204a626a0c9f59ea88a1f1777a54638ed242de8547d4ef57a",
+    "site04_mean_local_shadow.tif": "93e6b699eeb4494cd99f5de10607ee390dd5f19f1667aa848381e52fbb70f128",
+    "site04_illumination_report.json": "34b502a88d222cd9e671b6385031687f74d39971c136d9c23c7808dd5cb16820"
+  }
+}

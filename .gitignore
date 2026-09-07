@@ -1,4 +1,10 @@
-data/
+/data/*
+!/data/runtime/
+/data/runtime/*
+!/data/runtime/site04_dem_window.tif
+!/data/runtime/site04_mean_local_shadow.tif
+!/data/runtime/site04_illumination_report.json
+!/data/runtime/manifest.json
 .venv/
 __pycache__/
 *.pyc
