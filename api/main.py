@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from io import BytesIO
@@ -26,27 +27,48 @@ from core.plan import find_route
 from core.terrain import compute_slope_deg
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data/Site04"
+# Local repeatability identity recorded in DECISIONS.md, not a NASA signature.
+SOURCE_DEM_SHA256 = "38ff70dbdf2f066c2cfa94a646c3a59d653ce7f6b4528b15fc1b43ee397ce758"
 # Fixed, uncalibrated analysis choices from milestones 3/4, not EVA constants.
 SLOPE_LIMIT_DEG = 20.0
 SLOPE_WEIGHT = 2.0
 SHADOW_WEIGHT = 2.0
 
 
-def prepare_site(data_dir: Path) -> dict:
+def prepare_site(data_dir: Path, *, packaged: bool = False) -> dict:
     """Prepare Site04 arrays in meters/degrees and dimensionless shadow/cost.
 
     Registration and the fixed experiment follow DECISIONS.md milestones 3/4.
     Missing data is an error; illumination is never recomputed by the server.
+    packaged selects the cropped runtime bundle rather than the original DEM.
     """
-    dem_path = data_dir / "Site04_final_adj_5mpp_surf.tif"
+    dem_path = data_dir / (
+        "site04_dem_window.tif" if packaged else "Site04_final_adj_5mpp_surf.tif"
+    )
     shadow_path = data_dir / "site04_mean_local_shadow.tif"
     report_path = data_dir / "site04_illumination_report.json"
-    for path in (dem_path, dem_path.with_suffix(".tif.sha256"), shadow_path, report_path):
+    verification_path = (
+        data_dir / "manifest.json" if packaged else dem_path.with_suffix(".tif.sha256")
+    )
+    for path in (dem_path, verification_path, shadow_path, report_path):
         if not path.is_file():
             raise FileNotFoundError(
-                f"Missing {path}. Follow README terrain/illumination reproduction steps."
+                f"Missing {path}. Follow README input preparation and packaging steps."
             )
-    dem_sha256 = input_hash(dem_path)
+    if packaged:
+        manifest = json.loads(verification_path.read_text())
+        paths = (dem_path, shadow_path, report_path)
+        expected_hashes = manifest.get("files_sha256")
+        if (manifest.get("source_dem_sha256") != SOURCE_DEM_SHA256
+                or not isinstance(expected_hashes, dict)
+                or set(expected_hashes) != {path.name for path in paths}):
+            raise ValueError("Runtime manifest does not identify the fixed Site04 inputs")
+        for path in paths:
+            if input_hash(path, recorded=False) != expected_hashes[path.name]:
+                raise ValueError(f"Hash mismatch: {path}")
+        dem_sha256 = manifest["source_dem_sha256"]
+    else:
+        dem_sha256 = input_hash(dem_path)
     report = json.loads(report_path.read_text())
     expected = {
         "start_utc": START_UTC, "end_utc": END_UTC, "output_shape": [400, 400],
@@ -56,11 +78,18 @@ def prepare_site(data_dir: Path) -> dict:
     }
     if any(report.get(key) != value for key, value in expected.items()):
         raise ValueError("Illumination report does not match the fixed Site04 experiment")
+    expected_shape = (402, 402) if packaged else (3200, 3200)
+    # Pixel corners, projected meters: columns increase X, rows decrease Y.
+    # The crop starts at source (row 1999, col 579), one pixel outside the map.
+    expected_transform_m = (
+        Affine(5, 0, -6105, 0, -5, -8995) if packaged
+        else Affine(5, 0, -9000, 0, -5, 1000)
+    )
     with rasterio.open(dem_path) as source:
         if (source.crs is None or not source.crs.is_projected
                 or source.crs.linear_units_factor[1] != 1.0
-                or source.count != 1 or source.shape != (3200, 3200)
-                or source.transform != Affine(5, 0, -9000, 0, -5, 1000)
+                or source.count != 1 or source.shape != expected_shape
+                or source.transform != expected_transform_m
                 or source.scales != (1.0,) or source.offsets != (0.0,)
                 or source.dtypes != ("float32",)
                 or source.units[0] not in (None, "m", "meter", "metre", "meters", "metres")
@@ -134,7 +163,13 @@ def prepare_site(data_dir: Path) -> dict:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     started_seconds = perf_counter()
-    app.state.site = prepare_site(DATA_DIR)
+    bundle_dir = os.environ.get("LUNAR_DATA_DIR")
+    if bundle_dir is not None:
+        if not bundle_dir.strip():
+            raise ValueError("LUNAR_DATA_DIR must name a runtime bundle directory")
+        app.state.site = prepare_site(Path(bundle_dir), packaged=True)
+    else:
+        app.state.site = prepare_site(DATA_DIR)
     logging.getLogger("uvicorn.error").info(
         "Site04 preparation: %.3f seconds", perf_counter() - started_seconds,
     )

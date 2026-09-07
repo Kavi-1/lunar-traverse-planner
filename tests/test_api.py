@@ -1,8 +1,12 @@
 """HTTP checks against downloaded Site04 data; no generated terrain."""
 
 import json
+import os
 import shutil
+import subprocess
+import sys
 from io import BytesIO
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -211,3 +215,100 @@ def test_reject_dem_hash(copied_inputs):
     sidecar.write_text("incorrect-hash")
     with pytest.raises(ValueError, match="Hash mismatch"):
         main.prepare_site(copied_inputs)
+
+
+@pytest.fixture(scope="module")
+def runtime_bundle(tmp_path_factory):
+    """Exercise the exact README packaging block against the real inputs."""
+    root = Path(__file__).resolve().parents[1]
+    workspace = tmp_path_factory.mktemp("packaging")
+    (workspace / "data").mkdir()
+    (workspace / "data/Site04").symlink_to(main.DATA_DIR)
+    section = (root / "README.md").read_text().split("<!-- runtime-bundle -->", 1)[1]
+    code = section.split("uv run python - <<'PY'\n", 1)[1].split("\nPY\n```", 1)[0]
+    subprocess.run(
+        [sys.executable, "-c", code], cwd=workspace,
+        env=os.environ | {"PYTHONPATH": str(root)}, check=True, capture_output=True, text=True,
+    )
+    return workspace / "data/runtime"
+
+
+def test_runtime_bundle_matches_source(runtime_bundle, client):
+    assert {path.name for path in runtime_bundle.iterdir()} == {
+        "site04_dem_window.tif", "site04_mean_local_shadow.tif",
+        "site04_illumination_report.json", "manifest.json",
+    }
+    packaged = main.prepare_site(runtime_bundle, packaged=True)
+    for key in ("elevation_m", "slope_deg", "shadow_fraction", "cost_weights"):
+        np.testing.assert_array_equal(packaged[key], main.app.state.site[key])
+    assert packaged["metadata"] == main.app.state.site["metadata"]
+    assert packaged["png"] == main.app.state.site["png"]
+
+
+def test_runtime_bundle_environment(runtime_bundle, monkeypatch):
+    monkeypatch.setenv("LUNAR_DATA_DIR", str(runtime_bundle))
+    bundle_app = main.FastAPI(lifespan=main.lifespan)
+    bundle_app.router.routes = main.app.router.routes.copy()
+    with TestClient(bundle_app) as http:
+        response = post_route(http)
+        assert response.status_code == 200
+        assert response.json()["statistics"]["projected_length_m"] == pytest.approx(
+            1858.4419177103414, abs=1e-8,
+        )
+
+
+@pytest.mark.parametrize("value", ["", "missing-runtime-bundle"])
+def test_runtime_bundle_environment_never_falls_back(value, monkeypatch):
+    monkeypatch.setenv("LUNAR_DATA_DIR", value)
+    with pytest.raises((ValueError, FileNotFoundError)), TestClient(main.app):
+        pass
+
+
+@pytest.fixture
+def copied_bundle(runtime_bundle, tmp_path):
+    return Path(shutil.copytree(runtime_bundle, tmp_path / "bundle"))
+
+
+@pytest.mark.parametrize("name", [
+    "site04_dem_window.tif", "site04_mean_local_shadow.tif",
+    "site04_illumination_report.json", "manifest.json",
+])
+def test_runtime_bundle_missing_file(copied_bundle, name):
+    (copied_bundle / name).unlink()
+    with pytest.raises(FileNotFoundError, match="README"):
+        main.prepare_site(copied_bundle, packaged=True)
+
+
+@pytest.mark.parametrize("name", [
+    "site04_dem_window.tif", "site04_mean_local_shadow.tif",
+    "site04_illumination_report.json",
+])
+def test_runtime_bundle_corrupt_file(copied_bundle, name):
+    with (copied_bundle / name).open("ab") as stream:
+        stream.write(b"corruption")
+    with pytest.raises(ValueError, match="Hash mismatch"):
+        main.prepare_site(copied_bundle, packaged=True)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("source_dem_sha256", "wrong source"), ("files_sha256", {}), ("files_sha256", None),
+])
+def test_runtime_bundle_invalid_manifest(copied_bundle, field, value):
+    path = copied_bundle / "manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest[field] = value
+    path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="Runtime manifest"):
+        main.prepare_site(copied_bundle, packaged=True)
+
+
+def test_runtime_bundle_rejects_shifted_crop_even_with_matching_hash(copied_bundle):
+    path = copied_bundle / "site04_dem_window.tif"
+    with rasterio.open(path, "r+") as crop:
+        crop.transform = crop.transform * rasterio.Affine.translation(1, 0)
+    manifest_path = copied_bundle / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["files_sha256"][path.name] = main.input_hash(path, recorded=False)
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="registration"):
+        main.prepare_site(copied_bundle, packaged=True)
