@@ -1,7 +1,6 @@
 """HTTP checks against downloaded Site04 data; no generated terrain."""
 
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -228,16 +227,14 @@ def test_repository_runtime_bundle():
 
 @pytest.fixture(scope="module")
 def runtime_bundle(tmp_path_factory):
-    """Exercise the exact README packaging block against the real inputs."""
+    """Exercise the packaging script against the real inputs."""
     root = Path(__file__).resolve().parents[1]
     workspace = tmp_path_factory.mktemp("packaging")
     (workspace / "data").mkdir()
     (workspace / "data/Site04").symlink_to(main.DATA_DIR)
-    section = (root / "README.md").read_text().split("<!-- runtime-bundle -->", 1)[1]
-    code = section.split("uv run python - <<'PY'\n", 1)[1].split("\nPY\n```", 1)[0]
     subprocess.run(
-        [sys.executable, "-c", code], cwd=workspace,
-        env=os.environ | {"PYTHONPATH": str(root)}, check=True, capture_output=True, text=True,
+        [sys.executable, str(root / "scripts/package_runtime_bundle.py")],
+        cwd=workspace, check=True, capture_output=True, text=True,
     )
     return workspace / "data/runtime"
 
