@@ -1,0 +1,22 @@
+# Allow only application source, locked dependencies, and the prepared bundle.
+**
+!Dockerfile
+!pyproject.toml
+!uv.lock
+!api/
+!api/*.py
+!core/
+!core/*.py
+!web/
+!web/package.json
+!web/package-lock.json
+!web/index.html
+!web/vite.config.js
+!web/src/
+!web/src/**
+!data/
+!data/runtime/
+!data/runtime/site04_dem_window.tif
+!data/runtime/site04_mean_local_shadow.tif
+!data/runtime/site04_illumination_report.json
+!data/runtime/manifest.json
