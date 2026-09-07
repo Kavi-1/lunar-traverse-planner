@@ -104,6 +104,49 @@ def test_production_default_is_central(dem):
         compute_slope_deg(elevation_m[999:1002, 999:1002], transform_m, method="unknown")
 
 
+def test_clone_elevations_and_slope_hand_checked(dem):
+    from core.clones import terrain_window_m
+
+    clone_path = DEM_PATH.parent / 'Clones/Site04_final_adj_5mpp_0001_err.tif'
+    elevation_m, slope_deg, _ = terrain_window_m(clone_path)
+    base_m, _, _ = terrain_window_m(DEM_PATH)
+    # Actual downloaded float32 samples, not generated terrain. Window cell
+    # (200,80) is source (2200,660). Clone is already an elevation in meters.
+    assert elevation_m[200, 80] == 1435.2269287109375
+    assert elevation_m[200, 80] - base_m[200, 80] == -0.0467529296875
+    assert elevation_m[200, 200] - base_m[200, 200] == 0.514404296875
+    # Opposite neighbors: X=(1435.7071533203125-1434.6396484375)/10;
+    # Y=(1434.6376953125-1435.956787109375)/-10. atan(hypot(X,Y)) in deg.
+    assert slope_deg[200, 80] == pytest.approx(9.630946116730064, abs=1e-12)
+    # Center: X=(1262.10791015625-1261.85009765625)/10;
+    # Y=(1260.650634765625-1262.8253173828125)/-10.
+    assert slope_deg[200, 200] == pytest.approx(12.352271767161753, abs=1e-12)
+
+
+def test_analysis_halo_matches_full_dem(dem):
+    from core.clones import terrain_window_m
+
+    full_m, transform_m, _ = dem
+    cropped_m, slope_deg, cropped_transform_m = terrain_window_m(DEM_PATH)
+    np.testing.assert_array_equal(cropped_m, full_m[2000:2400, 580:980])
+    np.testing.assert_array_equal(slope_deg,
+                                 compute_slope_deg(full_m, transform_m)[2000:2400, 580:980])
+    assert cropped_transform_m == Affine(5, 0, -6100, 0, -5, -9000)
+
+
+def test_clone_hash_validation(tmp_path):
+    from core.clones import input_hash
+
+    path = tmp_path / 'input'
+    path.write_bytes(b'abc')
+    path.with_suffix('.sha256').write_text(
+        'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\n')
+    assert input_hash(path).startswith('ba7816bf')
+    path.write_bytes(b'abcd')
+    with pytest.raises(ValueError, match='Hash mismatch'):
+        input_hash(path)
+
+
 def test_clone_download_selection(tmp_path, monkeypatch):
     from scripts import download_site04
 
@@ -117,3 +160,43 @@ def test_clone_download_selection(tmp_path, monkeypatch):
     assert all(directory == tmp_path / 'Clones' for _, directory in requested)
     with pytest.raises(ValueError):
         download_site04.download_site04(tmp_path, clones_only=True, kernels_only=True)
+
+
+def test_download_preserves_real_dem_bytes(tmp_path):
+    from core.clones import input_hash
+    from scripts.download_site04 import download_file
+
+    # Local file URL exercises the exact copy/hash/reuse path without a network
+    # request or invented terrain. Corrupt only the test copy to verify rejection.
+    download_file(DEM_PATH.as_uri(), tmp_path, 60, False)
+    downloaded = tmp_path / DEM_PATH.name
+    assert input_hash(downloaded) == input_hash(DEM_PATH)
+    download_file(DEM_PATH.as_uri(), tmp_path, 60, False)
+    with downloaded.open('ab') as stream:
+        stream.write(b'corrupt')
+    with pytest.raises(RuntimeError, match='Hash mismatch'):
+        download_file(DEM_PATH.as_uri(), tmp_path, 60, False)
+    assert not downloaded.with_suffix('.tif.part').exists()
+
+
+def test_clone_preflight_missing_inputs_stops(tmp_path):
+    from core.clones import run_site04
+
+    with pytest.raises(FileNotFoundError, match='Missing'):
+        run_site04(tmp_path)
+    assert not (tmp_path / 'figure.png').exists()
+
+
+def test_clone_projection_matches_despite_wkt_names():
+    from rasterio.crs import CRS
+
+    from core.clones import matching_projection
+
+    clone_path = DEM_PATH.parent / 'Clones/Site04_final_adj_5mpp_0001_err.tif'
+    with rasterio.open(DEM_PATH) as nominal, rasterio.open(clone_path) as clone:
+        assert nominal.crs.to_wkt() != clone.crs.to_wkt()
+        assert matching_projection(clone.crs, nominal.crs)
+        altered = clone.crs.to_dict()
+        altered['R'] += 1  # Deliberately malformed registration, not a physical assumption.
+        assert not matching_projection(CRS.from_dict(altered), nominal.crs)
+        assert not matching_projection(None, nominal.crs)

@@ -349,3 +349,193 @@ def test_statistics_invalid_transform(statistics_patch, transform_m):
     heights_m, slopes_deg, _ = statistics_patch
     with pytest.raises(ValueError):
         route_statistics([[1, 1]], heights_m, slopes_deg, transform_m)
+
+
+def test_clone_geometry_hand_checked():
+    from core.clones import geometry_distances_m, vertex_weights_m
+
+    # Coordinate-only geometry, no fabricated terrain. Edges 3 and 4 m give
+    # weights 1.5, 3.5, 2 m. Parallel two-point routes at 4 m separation.
+    np.testing.assert_array_equal(vertex_weights_m([[0, 0], [3, 0], [3, 4]]), [1.5, 3.5, 2])
+    first_m = [[0, 0], [3, 0]]
+    second_m = [[0, 4], [3, 4]]
+    assert geometry_distances_m(first_m, first_m) == {
+        'mean_nearest_distance_m': 0, 'max_nearest_distance_m': 0}
+    expected = {'mean_nearest_distance_m': 4, 'max_nearest_distance_m': 4}
+    assert geometry_distances_m(first_m, second_m) == expected
+    assert geometry_distances_m(second_m, first_m) == expected
+    # Unequal collinear lengths 2 and 4: directed weighted means 0 and 0.5,
+    # symmetric mean 0.25, maximum 2. Middle vertices carry two half edges.
+    short_m = [[0, 0], [2, 0]]
+    long_m = [[0, 0], [2, 0], [4, 0]]
+    expected = {'mean_nearest_distance_m': 0.25, 'max_nearest_distance_m': 2}
+    assert geometry_distances_m(short_m, long_m) == expected
+    assert geometry_distances_m(long_m, short_m) == expected
+    assert geometry_distances_m([[0, 0]], [[3, 4]]) == {
+        'mean_nearest_distance_m': 5, 'max_nearest_distance_m': 5}
+    with pytest.raises(ValueError):
+        vertex_weights_m([])
+
+
+def test_clone_summaries_hand_checked():
+    from core.clones import continuous_summary
+
+    assert continuous_summary([1, 2, 3]) == pytest.approx({
+        'count': 3, 'mean': 2, 'sample_std': 1, 'median': 2,
+        'p5': 1.1, 'p95': 2.9, 'min': 1, 'max': 3})
+    assert continuous_summary([])['count'] == 0
+    assert continuous_summary([])['mean'] is None
+    assert continuous_summary([7])['sample_std'] is None
+
+
+def test_clone_cutoff_and_missing_terrain(statistics_patch):
+    from core.clones import nominal_feasibility
+
+    elevation_m, slope_deg, _ = statistics_patch
+    cells = np.array([[1, 1], [1, 2]])
+    cutoff_deg = float(slope_deg[1, 1])
+    result = nominal_feasibility(cells, elevation_m, slope_deg, cutoff_deg)
+    assert result['cutoff_violation_cells'] == 1
+    assert result['max_exceedance_deg'] == pytest.approx(18.242866980426832-cutoff_deg)
+    assert result['missing_terrain_cells'] == 0
+    invalid_deg = slope_deg.copy()
+    invalid_deg[1, 2] = np.nan
+    result = nominal_feasibility(cells, elevation_m, invalid_deg, cutoff_deg)
+    assert result['cutoff_violation_cells'] == 0
+    assert result['missing_terrain_cells'] == 1
+    assert not result['terrain_feasible']
+
+
+@pytest.fixture(scope='module')
+def clone_case():
+    import rasterio
+
+    from core.clones import solve_clone, terrain_window_m
+
+    elevation_m, slope_deg, transform_m = terrain_window_m(DEM_PATH)
+    with rasterio.open(DEM_PATH.parent / 'site04_mean_local_shadow.tif') as source:
+        shadow_fraction = source.read(1)
+    nominal = solve_clone(elevation_m, slope_deg, shadow_fraction, transform_m, None)
+    return elevation_m, slope_deg, shadow_fraction, transform_m, np.array(nominal['route_rc'])
+
+
+def test_clone_nominal_reproduction_and_fixed_cost(clone_case):
+    from core.clones import solve_clone
+
+    record = solve_clone(*clone_case)
+    assert record['statistics']['projected_length_m'] == pytest.approx(1858.4419177103414)
+    assert record['statistics']['total_cost_weighted_m'] == pytest.approx(1947.5175345932507)
+    assert record['statistics']['distance_weighted_mean_local_shadow_fraction'] == pytest.approx(
+        0.002958036734429219)
+    assert record['statistics']['diagonal_blocked_side_steps'] == 1
+    assert record['exact_nominal_match']
+    assert record['cost_disadvantage_weighted_m'] == 0
+    assert record['cost_disadvantage_percent'] == 0
+
+
+def test_clone_failures_and_aggregate_denominators(clone_case):
+    from core.clones import aggregate_records, solve_clone
+
+    elevation_m, slope_deg, shadow_fraction, transform_m, nominal_rc = clone_case
+    success = solve_clone(*clone_case)
+    blocked_deg = slope_deg.copy()
+    blocked_deg[200, 80] = np.nan  # Mask the actual start observation.
+    blocked = solve_clone(elevation_m, blocked_deg, shadow_fraction, transform_m, nominal_rc)
+    assert blocked['status'] == 'blocked_endpoints'
+    assert blocked['blocked_endpoints'] == ['start']
+    disconnected_deg = slope_deg.copy()
+    disconnected_deg[:, 180] = np.nan  # Mask a complete separating column.
+    disconnected = solve_clone(elevation_m, disconnected_deg, shadow_fraction,
+                               transform_m, nominal_rc)
+    assert disconnected['status'] == 'no_route'
+    for record in (blocked, disconnected):
+        for key in ('route_rc', 'statistics', 'geometry', 'nominal_statistics',
+                    'cost_disadvantage_weighted_m', 'cost_disadvantage_percent'):
+            assert record[key] is None
+    aggregate = aggregate_records([success, blocked, disconnected])
+    assert aggregate['ensemble_count'] == 3
+    assert aggregate['successful_routes'] == 1
+    assert aggregate['blocked_endpoints'] == 1
+    assert aggregate['disconnected_goals'] == 1
+    assert aggregate['statistics']['projected_length_m']['count'] == 1
+    assert aggregate['clones_with_missing_terrain_cells'] == 2
+
+
+def test_fixed_route_measurements_hand_checked(statistics_patch):
+    import rasterio
+
+    from core.clones import route_measurements
+
+    heights_m, slopes_deg, transform_m = statistics_patch
+    cells = np.array([[1, 1], [1, 2], [2, 3]])
+    with rasterio.open(DEM_PATH.parent / 'site04_mean_local_shadow.tif') as source:
+        shadow_fraction = source.read(1)[:5, :5]
+    costs = build_cost_surface(slopes_deg, slope_limit_deg=25, slope_weight=2,
+                               shadow_fraction=shadow_fraction, shadow_weight=2)
+    result = route_measurements(cells, heights_m, slopes_deg, shadow_fraction, costs, transform_m)
+    # Independent scalar edge sums, with distances 5 and sqrt(50) meters.
+    weights = [1 + 2*math.tan(math.radians(deg))**2 + 2*shadow_fraction[r, c]
+               for (r, c), deg in zip(cells, [17.646201418369948,
+                                             18.242866980426832, 19.402825626556908])]
+    expected_cost_m = 5*(weights[0]+weights[1])/2 + math.sqrt(50)*(weights[1]+weights[2])/2
+    expected_exposure = (5*(shadow_fraction[1, 1]+shadow_fraction[1, 2])/2
+                         + math.sqrt(50)*(shadow_fraction[1, 2]+shadow_fraction[2, 3])/2)
+    assert result['total_cost_weighted_m'] == pytest.approx(expected_cost_m, abs=1e-12)
+    assert result['distance_weighted_mean_local_shadow_fraction'] == pytest.approx(
+        expected_exposure/(5+math.sqrt(50)), abs=1e-12)
+
+
+def test_feasible_reference_cost_disadvantage(clone_case):
+    from itertools import pairwise
+
+    from core.clones import GOAL_XY_M, START_XY_M, solve_clone
+
+    elevation_m, slope_deg, shadow_fraction, transform_m, _ = clone_case
+    # Use a different feasible route through the real DEM to exercise nonzero
+    # disadvantage: the slope-only optimum omits the existing shadow preference.
+    slope_costs = build_cost_surface(slope_deg, slope_limit_deg=20, slope_weight=2)
+    reference = find_route(slope_costs, transform_m, START_XY_M, GOAL_XY_M)['route_rc']
+    record = solve_clone(elevation_m, slope_deg, shadow_fraction, transform_m, reference)
+    assert record['nominal_feasibility']['terrain_feasible']
+    # Independent scalar trapezoidal cost from the actual sampled slopes/shadow.
+    reference_cost_m = 0.0
+    for (r0, c0), (r1, c1) in pairwise(reference):
+        distance_m = math.hypot((r1-r0)*5, (c1-c0)*5)
+        before = 1 + 2*math.tan(math.radians(slope_deg[r0, c0]))**2 + 2*shadow_fraction[r0, c0]
+        after = 1 + 2*math.tan(math.radians(slope_deg[r1, c1]))**2 + 2*shadow_fraction[r1, c1]
+        reference_cost_m += distance_m*(before+after)/2
+    optimum_m = 1947.5175345932507
+    assert record['cost_disadvantage_weighted_m'] == pytest.approx(reference_cost_m-optimum_m)
+    assert record['cost_disadvantage_percent'] == pytest.approx(
+        100*(reference_cost_m-optimum_m)/optimum_m)
+    assert record['cost_disadvantage_weighted_m'] > 0
+
+
+
+
+def test_nominal_cutoff_severity_and_fraction(clone_case):
+    from core.clones import aggregate_records, solve_clone, terrain_window_m
+
+    _, _, shadow_fraction, _, nominal_rc = clone_case
+    clone_path = DEM_PATH.parent / 'Clones/Site04_final_adj_5mpp_0001_err.tif'
+    elevation_m, slope_deg, transform_m = terrain_window_m(clone_path)
+    clone = solve_clone(elevation_m, slope_deg, shadow_fraction, transform_m, nominal_rc)
+    nominal = solve_clone(*clone_case)
+    # Actual clone 0001 has one offending cell; its slope is 21.42163299392544°.
+    case = clone['nominal_cutoff_sensitivity']['20']
+    assert case['cutoff_violation_cells'] == 1
+    assert case['cutoff_violation_fraction'] == pytest.approx(1 / len(nominal_rc))
+    assert case['max_exceedance_deg'] == pytest.approx(1.4216329939254386)
+    for cutoff in ('22', '25'):
+        assert clone['nominal_cutoff_sensitivity'][cutoff]['cutoff_violation_cells'] == 0
+        assert clone['nominal_cutoff_sensitivity'][cutoff]['terrain_feasible']
+    summary = aggregate_records([nominal, clone])['nominal_cutoff_sensitivity']
+    assert summary['20']['ensemble_count'] == 2
+    assert summary['20']['clones_with_cutoff_violations'] == 1
+    severity = summary['20']['violating_clones_only']['max_exceedance_deg']
+    assert severity['count'] == 1  # Do not dilute severity with the feasible case's zero.
+    assert severity['mean'] == pytest.approx(1.4216329939254386)
+    assert summary['20']['all_clones']['cutoff_violation_fraction']['mean'] == pytest.approx(
+        0.5 / len(nominal_rc))
+    assert summary['25']['violating_clones_only']['max_exceedance_deg']['count'] == 0
+    assert summary['25']['violating_clones_only']['max_exceedance_deg']['mean'] is None
