@@ -217,6 +217,15 @@ def test_reject_dem_hash(copied_inputs):
         main.prepare_site(copied_inputs)
 
 
+def test_repository_runtime_bundle():
+    """Validate the shipped artifacts without source data or regeneration."""
+    bundle_dir = Path(__file__).resolve().parents[1] / "data/runtime"
+    site = main.prepare_site(bundle_dir, packaged=True)
+    assert site["elevation_m"].shape == (400, 400)
+    assert site["metadata"]["bounds_m"] == [-6100, -11000, -4100, -9000]
+    assert site["png"].startswith(b"\x89PNG\r\n\x1a\n")
+
+
 @pytest.fixture(scope="module")
 def runtime_bundle(tmp_path_factory):
     """Exercise the exact README packaging block against the real inputs."""
