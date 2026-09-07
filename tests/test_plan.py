@@ -511,6 +511,16 @@ def test_feasible_reference_cost_disadvantage(clone_case):
     assert record['cost_disadvantage_weighted_m'] > 0
 
 
+def test_occupancy_fraction_hand_checked():
+    from core.clones import route_occupancy_fraction
+
+    # Route cells only, no terrain. Shared cell is visited by both routes;
+    # the repeated visit in the first route must count only once.
+    first_rc = np.array([[0, 0], [0, 1], [0, 0]])
+    second_rc = np.array([[0, 0], [1, 0]])
+    np.testing.assert_array_equal(route_occupancy_fraction([first_rc, second_rc], (2, 2)),
+                                 [[1, 0.5], [0.5, 0]])
+    assert np.isnan(route_occupancy_fraction([], (2, 2))).all()
 
 
 def test_nominal_cutoff_severity_and_fraction(clone_case):

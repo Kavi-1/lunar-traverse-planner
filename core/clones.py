@@ -13,6 +13,10 @@ import platform
 from pathlib import Path
 from time import perf_counter
 
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 import rasterio
@@ -248,12 +252,75 @@ def aggregate_records(records: list[dict]) -> dict:
     return result
 
 
+def route_occupancy_fraction(routes_rc: list[np.ndarray], shape: tuple[int, int]) -> np.ndarray:
+    """Fraction of successful routes visiting each cell; no smoothing or length weighting."""
+    if not routes_rc:
+        return np.full(shape, np.nan)
+    counts = np.zeros(shape)
+    for route_rc in routes_rc:
+        # A route contributes at most one visit per cell, even if it doubles back.
+        counts[tuple(np.unique(route_rc, axis=0).T)] += 1
+    return counts / len(routes_rc)
 
 
+def plot_ensemble(report: dict, elevation_m: np.ndarray, transform_m: Affine,
+                  output_path: Path) -> None:
+    """Plot projected-meter maps and descriptive distributions, without smoothing."""
+    fig = plt.figure(figsize=(15, 12), layout="constrained")
+    grid = fig.add_gridspec(3, 6)
+    maps = [fig.add_subplot(grid[0, :3]), fig.add_subplot(grid[0, 3:])]
+    extent_m = (BOUNDS_M[0], BOUNDS_M[2], BOUNDS_M[1], BOUNDS_M[3])
+    artist = maps[0].imshow(elevation_m, extent=extent_m, cmap="gray")
+    fig.colorbar(artist, ax=maps[0], label="Nominal elevation (m)")
+    successful = [r for r in report["clones"] if r["status"] == "ok"]
+    for record in successful:
+        cells = np.asarray(record["route_rc"])
+        x_m, y_m = rasterio.transform.xy(transform_m, *cells.T)
+        maps[0].plot(x_m, y_m, color="tab:orange", alpha=0.12, linewidth=0.6)
+    occupancy = route_occupancy_fraction(
+        [np.asarray(record["route_rc"]) for record in successful], elevation_m.shape)
+    artist = maps[1].imshow(occupancy, extent=extent_m, vmin=0, vmax=1,
+                           cmap="magma", interpolation="nearest")
+    fig.colorbar(artist, ax=maps[1], label="Fraction of successful routes visiting cell")
+    cells = np.asarray(report["nominal"]["route_rc"])
+    x_m, y_m = rasterio.transform.xy(transform_m, *cells.T)
+    maps[0].plot(x_m, y_m, color="cyan", linewidth=1.4, label="Nominal route")
+    maps[0].legend(fontsize=8)
+    for ax in maps:
+        ax.scatter(*zip(START_XY_M, GOAL_XY_M), c=["lime", "red"], s=25, zorder=5)
+        ax.set(xlabel="Projected X (m)", ylabel="Projected Y (m)",
+               xlim=extent_m[:2], ylim=extent_m[2:])
+    maps[0].set_title("100 clones; fixed nominal local illumination")
+    maps[1].set_title("Unsmoothed route occupancy")
+    metrics = [("statistics", "projected_length_m", "Projected length (m)"),
+               ("statistics", "ascent_m", "Ascent (m)"),
+               ("statistics", "max_terrain_slope_deg", "Maximum terrain slope (deg)"),
+               ("geometry", "mean_nearest_distance_m", "Mean nearest-center distance (m)"),
+               ("geometry", "max_nearest_distance_m", "Maximum nearest-center distance (m)")]
+    for index, (group, key, label) in enumerate(metrics):
+        ax = fig.add_subplot(grid[1 + index // 3, (index % 3)*2:(index % 3)*2+2])
+        ax.hist([r[group][key] for r in successful], bins=15, color="tab:orange")
+        nominal = report["nominal"]["statistics"][key] if group == "statistics" else 0
+        ax.axvline(nominal, color="teal", label="Nominal")
+        ax.set(xlabel=label, ylabel="Clone count")
+        ax.legend()
+    ax = fig.add_subplot(grid[2, 4:])
+    ax.axis("off")
+    summary = report["aggregate"]
+    ax.text(0, 0.9, f"Successful routes: {len(successful)}/100\n"
+            f"Blocked endpoints: {summary['blocked_endpoints']}/100\n"
+            f"Disconnected goals: {summary['disconnected_goals']}/100\n"
+            f"Nominal cutoff violations: {summary['clones_with_cutoff_violation_cells']}/100\n"
+            f"Nominal missing terrain: {summary['clones_with_missing_terrain_cells']}/100\n\n"
+            "Geometry uses sampled pixel centers.\nDistributions condition on route success.\n"
+            "Descriptive ensemble, not failure probabilities.", va="top", fontsize=10)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=160)
+    plt.close(fig)
 
 
-def run_site04(data_dir: Path) -> dict:
-    """Preflight all 100 inputs, then write JSON; timing units are seconds."""
+def run_site04(data_dir: Path, figure_path: Path) -> dict:
+    """Preflight all 100 inputs, then write JSON and PNG; timing units are seconds."""
     started_seconds = perf_counter()
     nominal_path = data_dir / "Site04_final_adj_5mpp_surf.tif"
     paths = [data_dir / "Clones" / f"Site04_final_adj_5mpp_{i:04d}_err.tif"
@@ -352,10 +419,13 @@ def run_site04(data_dir: Path) -> dict:
               "timings": {"preflight_seconds": preflight_seconds}}
     report["timings"]["clone_stage_totals_seconds"] = {
         key: sum(record["timings"][key] for record in records) for key in records[0]["timings"]}
+    plot_started_seconds = perf_counter()
+    plot_ensemble(report, nominal_m, transform_m, figure_path)
+    report["timings"]["plot_seconds"] = perf_counter() - plot_started_seconds
     report["timings"]["total_seconds_excluding_download"] = perf_counter() - started_seconds
     output_path = data_dir / "site04_clones_report.json"
     output_path.write_text(json.dumps(report, indent=2, allow_nan=False) + "\n")
-    print(f"Saved {output_path}", flush=True)
+    print(f"Saved {output_path} and {figure_path}", flush=True)
     return report
 
 
@@ -363,4 +433,4 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--site", choices=["04"], required=True)
     args = parser.parse_args()
-    run_site04(Path("data/Site04"))
+    run_site04(Path("data/Site04"), Path("notebooks/site04_clones.png"))

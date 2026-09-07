@@ -183,7 +183,7 @@ def test_clone_preflight_missing_inputs_stops(tmp_path):
     from core.clones import run_site04
 
     with pytest.raises(FileNotFoundError, match='Missing'):
-        run_site04(tmp_path)
+        run_site04(tmp_path, tmp_path / 'figure.png')
     assert not (tmp_path / 'figure.png').exists()
 
 
