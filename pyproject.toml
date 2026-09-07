@@ -8,10 +8,12 @@ dependencies = [
     "matplotlib",
     "scikit-image>=0.26.0",
     "spiceypy",
+    "fastapi",
+    "uvicorn",
 ]
 
 [dependency-groups]
-dev = ["pytest", "ruff"]
+dev = ["pytest", "ruff", "httpx"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
