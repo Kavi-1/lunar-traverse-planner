@@ -549,3 +549,43 @@ def test_nominal_cutoff_severity_and_fraction(clone_case):
         0.5 / len(nominal_rc))
     assert summary['25']['violating_clones_only']['max_exceedance_deg']['count'] == 0
     assert summary['25']['violating_clones_only']['max_exceedance_deg']['mean'] is None
+
+
+def test_fifteen_degree_nominal_plan(clone_case):
+    from core.clones import GOAL_XY_M, START_XY_M, nominal_feasibility
+
+    elevation_m, slope_deg, shadow_fraction, transform_m, _ = clone_case
+    costs = build_cost_surface(slope_deg, slope_limit_deg=15, slope_weight=2,
+                               shadow_fraction=shadow_fraction, shadow_weight=2)
+    result = find_route(costs, transform_m, START_XY_M, GOAL_XY_M)
+    assert result['status'] == 'ok'
+    cells = result['route_rc']
+    stats = route_statistics(cells, elevation_m, slope_deg, transform_m)
+    # The downloaded nominal route has 164 axial 5 m steps and 151 diagonal
+    # sqrt(50) m steps: 164*5 + 151*sqrt(50) = 1887.7312395916867 m.
+    steps_rc = np.diff(cells, axis=0)
+    diagonal_count = np.count_nonzero(np.all(steps_rc != 0, axis=1))
+    axial_count = len(steps_rc) - diagonal_count
+    assert axial_count == 164
+    assert diagonal_count == 151
+    expected_length_m = 164*5 + 151*math.sqrt(50)
+    assert stats['projected_length_m'] == pytest.approx(expected_length_m)
+    assert stats['projected_length_m'] == pytest.approx(1887.7312395916867)
+    assert nominal_feasibility(cells, elevation_m, slope_deg, 15)['terrain_feasible']
+    assert stats['max_terrain_slope_deg'] == pytest.approx(13.453593067870676)
+    from core.clones import terrain_window_m
+
+    clone_m, clone_deg, _ = terrain_window_m(
+        DEM_PATH.parent / 'Clones/Site04_final_adj_5mpp_0023_err.tif')
+    feasibility = nominal_feasibility(cells, clone_m, clone_deg, 20)
+    # Downloaded clone cell (123,252) in the analysis crop: opposite-neighbor
+    # differences divided by signed 10 m baselines give central gradients.
+    gradient_x = (1414.2200927734375 - 1410.384033203125) / 10
+    gradient_y = (1411.85595703125 - 1412.0333251953125) / -10
+    expected_slope_deg = math.degrees(math.atan(math.hypot(gradient_x, gradient_y)))
+    assert expected_slope_deg == pytest.approx(21.00757773389859)
+    assert clone_deg[123, 252] == pytest.approx(expected_slope_deg)
+    assert feasibility['cutoff_violation_cells'] == 1
+    assert feasibility['max_exceedance_deg'] == pytest.approx(expected_slope_deg - 20)
+    assert feasibility['cutoff_violation_fraction'] == pytest.approx(1 / 316)
+    assert feasibility['missing_terrain_cells'] == 0

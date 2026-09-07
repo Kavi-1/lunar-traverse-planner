@@ -390,6 +390,20 @@ def run_site04(data_dir: Path, figure_path: Path) -> dict:
         if not np.isclose(nominal["statistics"][key], saved[key], rtol=0, atol=1e-8):
             raise RuntimeError(f"Nominal {key} disagrees with saved summary")
     nominal_rc = np.asarray(nominal["route_rc"])
+    # User-requested margin experiment: optimize on nominal terrain at 15 deg,
+    # then hold that route fixed while checking clone terrain against 20 deg.
+    margin_costs = build_cost_surface(nominal_deg, slope_limit_deg=15, slope_weight=2,
+                                      shadow_fraction=shadow_fraction, shadow_weight=2)
+    margin_route = find_route(margin_costs, transform_m, START_XY_M, GOAL_XY_M)
+    if margin_route["status"] != "ok":
+        raise RuntimeError("No nominal route at the requested 15-degree planning cutoff")
+    margin_rc = margin_route["route_rc"]
+    margin_report = {
+        "planning_cutoff_deg": 15, "evaluation_cutoff_deg": 20,
+        "route_rc": margin_rc.tolist(),
+        "nominal_statistics": route_measurements(
+            margin_rc, nominal_m, nominal_deg, shadow_fraction, margin_costs, transform_m),
+        "clone_evaluations": []}
     records = []
     for index, path in enumerate(paths, 1):
         load_started_seconds = perf_counter()
@@ -400,8 +414,26 @@ def run_site04(data_dir: Path, figure_path: Path) -> dict:
         record["timings"]["load_and_slope_seconds"] = load_seconds
         error_m = elevation_m - nominal_m
         record["elevation_difference_m"] = continuous_summary(error_m[np.isfinite(error_m)].tolist())
+        margin_case = nominal_feasibility(margin_rc, elevation_m, slope_deg, 20)
+        margin_case["clone_id"] = f"{index:04d}"
+        margin_case["max_terrain_slope_deg"] = (
+            float(np.max(slope_deg[tuple(margin_rc.T)]))
+            if margin_case["missing_terrain_cells"] == 0 else None)
+        margin_report["clone_evaluations"].append(margin_case)
         records.append(record)
         print(f"Clone {index:04d}/0100: {record['status']}", flush=True)
+    margin_cases = margin_report["clone_evaluations"]
+    margin_report["aggregate"] = {
+        "ensemble_count": len(margin_cases),
+        "compliant_clones": sum(case["terrain_feasible"] for case in margin_cases),
+        "clones_with_cutoff_violations": sum(case["cutoff_violation_cells"] > 0
+                                            for case in margin_cases),
+        "clones_with_missing_terrain": sum(case["missing_terrain_cells"] > 0
+                                          for case in margin_cases),
+        "all_clones": {key: continuous_summary([case[key] for case in margin_cases
+                                                if case[key] is not None])
+                       for key in ("max_terrain_slope_deg", "cutoff_violation_cells",
+                                   "cutoff_violation_fraction", "max_exceedance_deg")}}
     report = {"settings": {"site": "04", "start_xy_m": START_XY_M, "goal_xy_m": GOAL_XY_M,
               "bounds_m": BOUNDS_M, "shape": [400, 400], "transform_m": list(transform_m),
               "crs_wkt": crs_wkt, "clone_values": "full elevations in meters",
@@ -416,6 +448,7 @@ def run_site04(data_dir: Path, figure_path: Path) -> dict:
               **{name: importlib.metadata.version(name) for name in
                  ("numpy", "rasterio", "scikit-image", "matplotlib")}},
               "nominal": nominal, "clones": records, "aggregate": aggregate_records(records),
+              "planning_margin": margin_report,
               "timings": {"preflight_seconds": preflight_seconds}}
     report["timings"]["clone_stage_totals_seconds"] = {
         key: sum(record["timings"][key] for record in records) for key in records[0]["timings"]}
