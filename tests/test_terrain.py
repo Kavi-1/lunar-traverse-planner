@@ -102,3 +102,18 @@ def test_production_default_is_central(dem):
     assert result_deg[1, 1] == pytest.approx(17.646201418369948, abs=1e-12)
     with pytest.raises(ValueError, match="Unknown slope method"):
         compute_slope_deg(elevation_m[999:1002, 999:1002], transform_m, method="unknown")
+
+
+def test_clone_download_selection(tmp_path, monkeypatch):
+    from scripts import download_site04
+
+    requested = []
+    monkeypatch.setattr(download_site04, 'download_file',
+                        lambda url, **kwargs: requested.append((url, kwargs['output_dir'])))
+    download_site04.download_site04(tmp_path, clones_only=True)
+    assert len(requested) == 100
+    assert requested[0][0].endswith('/Clones/Site04_final_adj_5mpp_0001_err.tif')
+    assert requested[-1][0].endswith('/Clones/Site04_final_adj_5mpp_0100_err.tif')
+    assert all(directory == tmp_path / 'Clones' for _, directory in requested)
+    with pytest.raises(ValueError):
+        download_site04.download_site04(tmp_path, clones_only=True, kernels_only=True)
