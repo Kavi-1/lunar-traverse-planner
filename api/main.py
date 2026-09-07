@@ -15,6 +15,7 @@ import rasterio
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from matplotlib.colors import LightSource
 from matplotlib.image import imsave
 from pydantic import BaseModel, ConfigDict, Field
@@ -235,3 +236,10 @@ def route(body: RouteRequest, request: Request) -> dict:
             site["cost_weights"], site["transform_m"],
         )
     return result
+
+
+# Register the frontend last so /api routes retain precedence. Vite remains
+# available for development when no compiled frontend exists on disk.
+frontend_dir = Path(__file__).resolve().parents[1] / "web/dist"
+if frontend_dir.is_dir():
+    app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")

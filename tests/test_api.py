@@ -312,3 +312,19 @@ def test_runtime_bundle_rejects_shifted_crop_even_with_matching_hash(copied_bund
     manifest_path.write_text(json.dumps(manifest))
     with pytest.raises(ValueError, match="registration"):
         main.prepare_site(copied_bundle, packaged=True)
+
+
+@pytest.mark.skipif(not main.frontend_dir.is_dir(), reason="Run the frontend build first")
+def test_compiled_frontend_and_api_precedence(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert '<div id="root"></div>' in response.text
+    for path in (main.frontend_dir / "assets").iterdir():
+        asset = client.get(f"/assets/{path.name}")
+        assert asset.status_code == 200
+        assert asset.content == path.read_bytes()
+    assert client.get("/api/site").json()["site"] == "Site04"
+    assert post_route(client).status_code == 200
+    for path in ("/assets/missing.js", "/api/missing", "/data/runtime/manifest.json"):
+        assert client.get(path).status_code == 404
